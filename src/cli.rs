@@ -6,7 +6,7 @@ use std::{
 use anyhow::Result;
 use crossterm::{
     cursor,
-    event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers},
+    event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     style::{self, Color, Stylize},
     terminal::{self, ClearType},
@@ -231,6 +231,11 @@ async fn handle_key(
     cmd_tx: &mpsc::UnboundedSender<CliCommand>,
     stdout: &mut io::Stdout,
 ) -> Result<bool> {
+    // Ignore key-release and key-repeat events (Windows sends both Press and Release).
+    if key.kind == KeyEventKind::Release {
+        return Ok(false);
+    }
+
     // Ctrl-C anywhere → quit
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         let _ = cmd_tx.send(CliCommand::Quit);
