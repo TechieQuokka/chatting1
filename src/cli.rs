@@ -459,7 +459,7 @@ fn draw_prompt(stdout: &mut io::Stdout, label: &str, _masking: bool) -> Result<(
 }
 
 fn redraw_prompt(stdout: &mut io::Stdout, state: &CliState) -> Result<()> {
-    let (_, height) = terminal::size()?;
+    let (width, height) = terminal::size()?;
     execute!(stdout, cursor::MoveTo(0, height - 1), terminal::Clear(ClearType::CurrentLine))?;
 
     let input_display = if state.masking {
@@ -467,7 +467,20 @@ fn redraw_prompt(stdout: &mut io::Stdout, state: &CliState) -> Result<()> {
     } else {
         state.input_buffer.clone()
     };
-    execute!(stdout, style::Print(format!("{}{}", state.prompt_label, input_display)))?;
+
+    // Scroll to end: only show the tail of the input that fits on one line.
+    // This prevents long inputs (e.g. room codes) from wrapping and leaving
+    // uncleared artefacts on previous lines.
+    let label_len = state.prompt_label.chars().count();
+    let available = (width as usize).saturating_sub(label_len);
+    let char_count = input_display.chars().count();
+    let visible_input: String = if char_count > available {
+        input_display.chars().skip(char_count - available).collect()
+    } else {
+        input_display
+    };
+
+    execute!(stdout, style::Print(format!("{}{}", state.prompt_label, visible_input)))?;
     execute!(stdout, cursor::Show)?;
     stdout.flush()?;
     Ok(())

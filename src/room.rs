@@ -1,5 +1,4 @@
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use anyhow::{bail, Context, Result};
 
 /// Identifies a GossipSub topic for a given room.
 pub fn topic_for_room(room_name: &str) -> String {
@@ -9,7 +8,10 @@ pub fn topic_for_room(room_name: &str) -> String {
 // ── Room code ─────────────────────────────────────────────────────────────────
 
 /// Data embedded in a room code shared out-of-band.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Encoded as `room_name\0peer_id\0addr` → Base58, which is notably shorter
+/// than the previous JSON → Base58 encoding.
+#[derive(Debug, Clone)]
 pub struct RoomCodeData {
     /// Human-readable room name (maps to GossipSub topic).
     pub room_name: String,
@@ -22,17 +24,26 @@ pub struct RoomCodeData {
 impl RoomCodeData {
     /// Encode to a compact Base58 string safe to share over any channel.
     pub fn encode(&self) -> Result<String> {
-        let json = serde_json::to_vec(self).context("serialize room code")?;
-        Ok(bs58::encode(&json).into_string())
+        // NUL-delimited: room_name\0peer_id\0addr — no JSON overhead.
+        let raw = format!("{}\0{}\0{}", self.room_name, self.peer_id, self.addr);
+        Ok(bs58::encode(raw.as_bytes()).into_string())
     }
 
     /// Decode a Base58 room code string.
     pub fn decode(code: &str) -> Result<Self> {
-        let json = bs58::decode(code)
+        let bytes = bs58::decode(code)
             .into_vec()
             .context("base58 decode room code")?;
-        let data: Self = serde_json::from_slice(&json).context("deserialize room code")?;
-        Ok(data)
+        let s = std::str::from_utf8(&bytes).context("room code is not valid UTF-8")?;
+        let parts: Vec<&str> = s.splitn(3, '\0').collect();
+        if parts.len() != 3 {
+            bail!("invalid room code format");
+        }
+        Ok(Self {
+            room_name: parts[0].to_string(),
+            peer_id: parts[1].to_string(),
+            addr: parts[2].to_string(),
+        })
     }
 }
 
