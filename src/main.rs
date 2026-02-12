@@ -48,6 +48,8 @@ async fn main() -> Result<()> {
 
     // ── Spawn tasks ───────────────────────────────────────────────────────────
 
+    let initial_nickname = identity.nickname.clone();
+
     // Network task — drives the libp2p swarm.
     tokio::spawn(async move {
         net_service.run().await;
@@ -69,7 +71,7 @@ async fn main() -> Result<()> {
     });
 
     // CLI task — owns the terminal (runs until the user quits).
-    cli::run_cli(cli_cmd_tx, ui_event_rx).await?;
+    cli::run_cli(cli_cmd_tx, ui_event_rx, initial_nickname).await?;
 
     // Give the app a moment to clean up.
     let _ = tokio::time::timeout(

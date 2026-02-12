@@ -148,6 +148,21 @@ impl App {
                 let _ = self.ui_event_tx.send(UiEvent::NewMessage(msg));
             }
 
+            CliCommand::ChangeNickname(new_nick) => {
+                let new_nick = new_nick.trim().to_string();
+                if new_nick.is_empty() {
+                    let _ = self.ui_event_tx.send(UiEvent::Error(
+                        "Nickname cannot be empty.".to_string(),
+                    ));
+                } else {
+                    let new_nick: String = new_nick.chars().take(32).collect();
+                    self.identity.nickname = new_nick.clone();
+                    self.config.nickname = Some(new_nick.clone());
+                    let _ = self.config.save();
+                    let _ = self.ui_event_tx.send(UiEvent::NicknameChanged(new_nick));
+                }
+            }
+
             CliCommand::Help => {
                 let help = concat!(
                     "/quit   — leave room / exit\n",

@@ -112,6 +112,8 @@ pub enum UiEvent {
     RoomJoined(String),
     /// Wrong password.
     AccessDenied,
+    /// Nickname was changed successfully.
+    NicknameChanged(String),
     Error(String),
 }
 
@@ -123,6 +125,7 @@ pub enum CliCommand {
     JoinRoom { code: String, password: String },
     LeaveRoom,
     ListPeers,
+    ChangeNickname(String),
     Help,
     Quit,
 }

@@ -26,6 +26,7 @@ enum Screen {
     MainMenu,
     CreateRoom { step: u8 },
     JoinRoom { step: u8 },
+    ChangeNickname,
     Chat,
 }
 
@@ -40,10 +41,12 @@ struct CliState {
     masking: bool,
     /// Label shown before the input field (e.g. "Room name: ").
     prompt_label: String,
+    /// Current nickname (kept in sync with the app layer).
+    nickname: String,
 }
 
 impl CliState {
-    fn new() -> Self {
+    fn new(nickname: String) -> Self {
         Self {
             messages: VecDeque::new(),
             input_buffer: String::new(),
@@ -51,6 +54,7 @@ impl CliState {
             peer_count: 0,
             masking: false,
             prompt_label: String::new(),
+            nickname,
         }
     }
 
@@ -68,6 +72,7 @@ impl CliState {
 pub async fn run_cli(
     cli_cmd_tx: mpsc::UnboundedSender<CliCommand>,
     ui_event_rx: mpsc::UnboundedReceiver<UiEvent>,
+    nickname: String,
 ) -> Result<()> {
     // Enter alternate screen + raw mode.
     terminal::enable_raw_mode()?;
@@ -79,7 +84,7 @@ pub async fn run_cli(
         terminal::Clear(ClearType::All)
     )?;
 
-    let result = cli_inner(cli_cmd_tx, ui_event_rx, &mut stdout).await;
+    let result = cli_inner(cli_cmd_tx, ui_event_rx, &mut stdout, nickname).await;
 
     // Cleanup — always restore terminal.
     let _ = execute!(
@@ -98,15 +103,16 @@ async fn cli_inner(
     cmd_tx: mpsc::UnboundedSender<CliCommand>,
     mut ui_rx: mpsc::UnboundedReceiver<UiEvent>,
     stdout: &mut io::Stdout,
+    nickname: String,
 ) -> Result<()> {
-    let mut state = CliState::new();
+    let mut state = CliState::new(nickname);
     let mut event_stream = EventStream::new();
 
     let mut screen = Screen::MainMenu;
     let mut create_name = String::new();
     let mut join_code = String::new();
 
-    draw_main_menu(stdout)?;
+    draw_main_menu(stdout, &state.nickname)?;
 
     loop {
         tokio::select! {
@@ -127,8 +133,10 @@ async fn cli_inner(
 
                         // Redraw after input
                         match &screen {
-                            Screen::MainMenu => draw_main_menu(stdout)?,
-                            Screen::CreateRoom { .. } | Screen::JoinRoom { .. } => {
+                            Screen::MainMenu => draw_main_menu(stdout, &state.nickname)?,
+                            Screen::CreateRoom { .. }
+                            | Screen::JoinRoom { .. }
+                            | Screen::ChangeNickname => {
                                 redraw_prompt(stdout, &state)?
                             }
                             Screen::Chat => redraw_chat(stdout, &state)?,
@@ -137,7 +145,7 @@ async fn cli_inner(
 
                     Event::Resize(_, _) => {
                         match &screen {
-                            Screen::MainMenu => draw_main_menu(stdout)?,
+                            Screen::MainMenu => draw_main_menu(stdout, &state.nickname)?,
                             Screen::Chat => redraw_chat(stdout, &state)?,
                             _ => {}
                         }
@@ -205,7 +213,15 @@ async fn cli_inner(
                         state.input_buffer.clear();
                         state.current_room = None;
                         screen = Screen::MainMenu;
-                        draw_main_menu(stdout)?;
+                        draw_main_menu(stdout, &state.nickname)?;
+                    }
+
+                    UiEvent::NicknameChanged(new_nick) => {
+                        state.nickname = new_nick.clone();
+                        state.input_buffer.clear();
+                        state.prompt_label.clear();
+                        screen = Screen::MainMenu;
+                        draw_main_menu(stdout, &state.nickname)?;
                     }
 
                     UiEvent::Error(err) => {
@@ -259,6 +275,13 @@ async fn handle_key(
                 state.input_buffer.clear();
                 state.prompt_label = "Room code: ".to_string();
                 draw_prompt(stdout, "Room code: ", false)?;
+            }
+            KeyCode::Char('3') => {
+                *screen = Screen::ChangeNickname;
+                state.input_buffer.clear();
+                let label = format!("New nickname (current: {}): ", state.nickname);
+                state.prompt_label = label.clone();
+                draw_prompt(stdout, &label, false)?;
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 let _ = cmd_tx.send(CliCommand::Quit);
@@ -325,6 +348,28 @@ async fn handle_key(
             _ => handle_text_input(key, &mut state.input_buffer),
         },
 
+        // ── Change nickname ───────────────────────────────────────────
+        Screen::ChangeNickname => match key.code {
+            KeyCode::Enter => {
+                let new_nick = state.input_buffer.trim().to_string();
+                state.input_buffer.clear();
+                state.prompt_label.clear();
+                if !new_nick.is_empty() {
+                    let _ = cmd_tx.send(CliCommand::ChangeNickname(new_nick));
+                } else {
+                    // Empty input → cancel, return to menu
+                    *screen = Screen::MainMenu;
+                    draw_main_menu(stdout, &state.nickname)?;
+                }
+            }
+            KeyCode::Esc => {
+                state.input_buffer.clear();
+                state.prompt_label.clear();
+                *screen = Screen::MainMenu;
+            }
+            _ => handle_text_input(key, &mut state.input_buffer),
+        },
+
         // ── Chat ──────────────────────────────────────────────────────
         Screen::Chat => match key.code {
             KeyCode::Enter => {
@@ -370,25 +415,34 @@ fn handle_text_input(key: KeyEvent, buf: &mut String) {
 
 // ── Drawing ───────────────────────────────────────────────────────────────────
 
-fn draw_main_menu(stdout: &mut io::Stdout) -> Result<()> {
+fn draw_main_menu(stdout: &mut io::Stdout, nickname: &str) -> Result<()> {
     let (width, height) = terminal::size()?;
     execute!(stdout, terminal::Clear(ClearType::All))?;
 
     let title = "=== P2P Chat ===";
-    let items = ["[1] Create room", "[2] Join room", "[Q] Quit"];
+    let logged_in = format!("Logged in as: {}", nickname);
+    let items = [
+        "[1] Create room",
+        "[2] Join room",
+        "[3] Change nickname",
+        "[Q] Quit",
+    ];
 
-    let start_row = height / 2 - 3;
-    let col = (width / 2).saturating_sub(10);
+    let start_row = height / 2 - 4;
+    let col = (width / 2).saturating_sub(12);
 
     execute!(stdout, cursor::MoveTo(col, start_row))?;
     execute!(stdout, style::PrintStyledContent(title.bold()))?;
 
+    execute!(stdout, cursor::MoveTo(col, start_row + 1))?;
+    execute!(stdout, style::PrintStyledContent(logged_in.dark_grey()))?;
+
     for (i, item) in items.iter().enumerate() {
-        execute!(stdout, cursor::MoveTo(col, start_row + 2 + i as u16))?;
+        execute!(stdout, cursor::MoveTo(col, start_row + 3 + i as u16))?;
         execute!(stdout, style::Print(item))?;
     }
 
-    execute!(stdout, cursor::MoveTo(col, start_row + 6))?;
+    execute!(stdout, cursor::MoveTo(col, start_row + 8))?;
     execute!(stdout, style::Print("> "))?;
     execute!(stdout, cursor::Show)?;
     stdout.flush()?;
