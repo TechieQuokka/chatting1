@@ -1,0 +1,47 @@
+[package]
+name = "chatting1"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "chat"
+path = "src/main.rs"
+
+[dependencies]
+# P2P Networking
+libp2p = { version = "0.56", features = [
+    "tcp", "noise", "yamux",
+    "gossipsub", "kad", "mdns",
+    "relay", "dcutr", "identify",
+    "macros", "tokio", "dns", "ed25519",
+] }
+
+# Async Runtime
+tokio = { version = "1.49", features = ["full"] }
+futures = "0.3"
+
+# Terminal UI
+crossterm = { version = "0.29", features = ["event-stream"] }
+
+# Cryptography (stable releases)
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.0"
+
+# Encoding
+bs58 = "0.5"
+base64 = "0.22"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6.0"
+anyhow = "1.0"
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
