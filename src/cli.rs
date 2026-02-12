@@ -38,6 +38,8 @@ struct CliState {
     peer_count: usize,
     /// Currently masking input (password entry).
     masking: bool,
+    /// Label shown before the input field (e.g. "Room name: ").
+    prompt_label: String,
 }
 
 impl CliState {
@@ -48,6 +50,7 @@ impl CliState {
             current_room: None,
             peer_count: 0,
             masking: false,
+            prompt_label: String::new(),
         }
     }
 
@@ -248,11 +251,13 @@ async fn handle_key(
             KeyCode::Char('1') => {
                 *screen = Screen::CreateRoom { step: 0 };
                 state.input_buffer.clear();
+                state.prompt_label = "Room name: ".to_string();
                 draw_prompt(stdout, "Room name: ", false)?;
             }
             KeyCode::Char('2') => {
                 *screen = Screen::JoinRoom { step: 0 };
                 state.input_buffer.clear();
+                state.prompt_label = "Room code: ".to_string();
                 draw_prompt(stdout, "Room code: ", false)?;
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -271,6 +276,7 @@ async fn handle_key(
                         state.input_buffer.clear();
                         *step = 1;
                         state.masking = true;
+                        state.prompt_label = "Password (leave blank for none): ".to_string();
                         draw_prompt(stdout, "Password (leave blank for none): ", true)?;
                     }
                     _ => {
@@ -299,6 +305,7 @@ async fn handle_key(
                         state.input_buffer.clear();
                         *step = 1;
                         state.masking = true;
+                        state.prompt_label = "Password (leave blank for none): ".to_string();
                         draw_prompt(stdout, "Password (leave blank for none): ", true)?;
                     }
                     _ => {
@@ -401,12 +408,12 @@ fn redraw_prompt(stdout: &mut io::Stdout, state: &CliState) -> Result<()> {
     let (_, height) = terminal::size()?;
     execute!(stdout, cursor::MoveTo(0, height - 1), terminal::Clear(ClearType::CurrentLine))?;
 
-    let display = if state.masking {
+    let input_display = if state.masking {
         "•".repeat(state.input_buffer.len())
     } else {
         state.input_buffer.clone()
     };
-    execute!(stdout, style::Print(display))?;
+    execute!(stdout, style::Print(format!("{}{}", state.prompt_label, input_display)))?;
     execute!(stdout, cursor::Show)?;
     stdout.flush()?;
     Ok(())
